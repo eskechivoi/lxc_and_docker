@@ -14,7 +14,7 @@ install_docker() {
 	lxc config set $CONTAINER_NAME security.nesting=true security.syscalls.intercept.mknod=true security.syscalls.intercept.setxattr=true
 	lxc restart $CONTAINER_NAME
 	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get update"
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install \
+	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y \
 		ca-certificates \
 		curl \
 		gnupg \
@@ -58,8 +58,11 @@ build () {
 }
 
 lxcstartc () {
-    if [[ ! -z "$1" ]]; then 
-    lxc-start -n $CONTAINER_NAME -f $1
+    if [[ "$1" ]]; then 
+        lxc-start -n $CONTAINER_NAME
+    else
+        lxc-start -n $CONTAINER_NAME -f $1 
+    fi
 }
 
 print_help() {
