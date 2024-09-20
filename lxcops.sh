@@ -43,7 +43,7 @@ restart_docker() {
 }
 
 load_file() {
-	lxc file push ./$1 $CONTAINER_NAME/root/web/
+	lxc file push ./$1 $CONTAINER_NAME/root/
 }
 
 build () {
@@ -57,28 +57,33 @@ build () {
 	restart_docker
 }
 
+lxcstartc () {
+    if [[ ! -z "$1" ]]; then 
+    lxc-start -n $CONTAINER_NAME -f $1
+}
+
 print_help() {
 	echo "Operate the SUGUS web LXC container. This script MUST be run as root."
 	echo ""
 	echo "Commands:"
-    echo "  -n <name>  Sets the container name to <name>."
-	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also deploys the lxc container"
-	echo "  -d	Deploys the LXC container without cleaning the current container (that is, without overriding it)."
-	echo "  -l	Uploads the web's docker container file into the LXC container."
-	echo "  -r	Restarts the web's docker container inside the LXC container."
+    echo "  -n {name}  Sets the container name to {name}."
+	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container"
+	echo "  -s [config_file_path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified."
+	echo "  -l	Uploads a file into the LXC containers root folder."
+	echo "  -r	Restarts all docker containers inside the LXC container."
 	echo ""
 	echo "-l and -r options may be used together to reupload and reload the website's docker container. Order of flags matter."
 }
 
-while getopts "bdhrn:" arg; do
+while getopts "bshrn:" arg; do
 	case $arg in
 		b)
 			echo "Building the LXC container. This will override the container in case it already exists..."
 			build	
 			;;
-		d)
-			echo "Deploying the LXC container..."
-			deploy
+		s)
+			echo "Starting the LXC container..."
+			lxcstartc
 			;;
 		r)
 			echo "Restarting the docker containers inside the LXC container."
