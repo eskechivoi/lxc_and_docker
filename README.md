@@ -14,4 +14,4 @@ block-beta
     LXCContainer1 --> DockerContainer1
     LXCContainer1 --> DockerContainer2
     LXCContainerN --> DockerContainerN
-```mermaid
+```
