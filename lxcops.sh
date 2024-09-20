@@ -72,10 +72,9 @@ print_help() {
     echo "  -n {name}  Sets the container name to {name}."
 	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container"
 	echo "  -s [config_file_path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified."
-	echo "  -l	Uploads a file into the LXC containers root folder."
+	echo "  -l	Uploads a container image exported as a .tar.gz file into the LXC container's /root/containers folder."
 	echo "  -r	Restarts all docker containers inside the LXC container."
 	echo ""
-	echo "-l and -r options may be used together to reupload and reload the website's docker container. Order of flags matter."
 }
 
 while getopts "bshrn:" arg; do
