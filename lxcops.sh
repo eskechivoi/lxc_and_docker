@@ -5,8 +5,8 @@ COMPOSE_FILE=$1
 STORAGE_POOL="docker"
 
 if [[ -z "$(ls $1)" ]]; then
-    echo "A compose file must be passed as the first argument" >&2
-    exit -1
+	echo "A compose file must be passed as the first argument" >&2
+	exit -1
 fi
 
 install_docker() {
@@ -39,15 +39,15 @@ restart_docker() {
 		docker container stop $container; \
 		docker container rm $container; \       		
 		done'
-    lxc exec $CONTAINER_NAME -- bash -c 'docker images | awk "{print $1}" | while read imageId; do \
-        if [[ $imageId != "IMAGE" ]]; then
-            docker rmi "$imageId"; \
-        fi
-        done'
-    lxc exec $CONTAINER_NAME -- bash -c 'for file in $(ls /root/containers/); do \
-        docker load -i /root/containers/$file; \
-        done'
-    lxc exec $CONTAINER_NAME -- bash -c "cd /root/containers/ | docker-compose up"
+	lxc exec $CONTAINER_NAME -- bash -c 'docker images | awk "{print $1}" | while read imageId; do \
+		if [[ $imageId != "IMAGE" ]]; then
+			docker rmi "$imageId"; \
+		fi
+		done'
+	lxc exec $CONTAINER_NAME -- bash -c 'for file in $(ls /root/containers/); do \
+		docker load -i /root/containers/$file; \
+		done'
+	lxc exec $CONTAINER_NAME -- bash -c "cd /root/containers/ | docker-compose up"
 }
 
 load_container_file() {
@@ -62,35 +62,35 @@ build () {
 	fi
 	lxc launch ubuntu:jammy $CONTAINER_NAME 
 	install_docker
-    lxc exec $CONTAINER_NAME -- bash -c 'mkdir /root/containers'
-    echo "Setting the docker-compose file"
-    lxc file push $COMPOSE_FILE $CONTAINER_NAME:/root/containers/docker-compose.yaml --force
+	lxc exec $CONTAINER_NAME -- bash -c 'mkdir /root/containers'
+	echo "Setting the docker-compose file"
+	lxc file push $COMPOSE_FILE $CONTAINER_NAME:/root/containers/docker-compose.yaml --force
 	restart_docker
 }
 
 lxcstartc () {
-    if [[ "$1" ]]; then 
-        lxc-start -n $CONTAINER_NAME
-    else
-        lxc-start -n $CONTAINER_NAME -f $1 
-    fi
+	if [[ "$1" ]]; then 
+		lxc-start -n $CONTAINER_NAME
+	else
+		lxc-start -n $CONTAINER_NAME -f $1 
+	fi
 }
 
 print_help() {
 	echo "Operate the SUGUS web LXC container. This script MUST be run as root."
 	echo ""
-    echo "USAGE: "
-    echo "lxcops.sh {docker-compose.yaml file path} [-n name] [-l .tar.gz_file_path] [-s [config_file_path]] []"
-    echo "A 'docker-compose.yaml' must be passed as the first argument. This file must define which containers to run and how to start them." 
-    echo ""
+	echo "USAGE: "
+	echo "lxcops.sh {docker-compose.yaml file path} [-n name] [-l .tar.gz_file_path] [-s [config_file_path]] []"
+	echo "A 'docker-compose.yaml' must be passed as the first argument. This file must define which containers to run and how to start them." 
+	echo ""
 	echo "Commands:"
-    echo "  -n {name}  Sets the container name to {name}."
+	echo "  -n {name}  Sets the container name to {name}."
 	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container. This command will remove all uploaded docker container images."
 	echo "  -s [config file path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified. "
-    echo -n "This command will restart all docker containers."
+	echo -n "This command will restart all docker containers."
 	echo "  -l {.tar.gz file path}  Uploads a container image exported as a .tar.gz file into the LXC container's /root/containers folder."
 	echo "  -r	Restarts all docker containers inside the LXC container and reloads all docker images."
-    echo "  -h  Prints this help"
+	echo "  -h  Prints this help"
 	echo ""
 }
 
@@ -112,10 +112,10 @@ while getopts "bs:rl:n:h" arg; do
 			echo "Uploading the $OPTARG container image file into the LXC container."
 			load_container_file
 			;;
-        n)
-            CONTAINER_NAME=$OPTARG
-            echo "LXC Container name set to $OPTARG"
-            ;;
+		n)
+			CONTAINER_NAME=$OPTARG
+			echo "LXC Container name set to $OPTARG"
+			;;
 		h)
 			print_help
 			;;
