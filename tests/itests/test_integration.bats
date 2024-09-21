@@ -3,13 +3,19 @@
 BATS_DEBUG=true
 LXCOPS_SCRIPT="../../lxcops.sh"
 
-@test "build and deploy with custom name" {
+setup() {
     if lxc list | grep -q "^| lxcopsTestIntegration "; then
         lxc stop lxcopsTestIntegration
         lxc delete lxcopsTestIntegration
     fi
+}
+
+@test "build and deploy with custom name" {
     $LXCOPS_SCRIPT -n "lxcopsTestIntegration" -b
     [ "$(lxc list | grep "lxcopsTestIntegration")" ]
+}
+
+teardown() {
     lxc stop lxcopsTestIntegration
     lxc delete lxcopsTestIntegration
 }

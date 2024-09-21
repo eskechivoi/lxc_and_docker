@@ -1,7 +1,13 @@
 #!/bin/bash
 
 CONTAINER_NAME="myfirstcontainer"
+COMPOSE_FILE=$1
 STORAGE_POOL="docker"
+
+if [[ -z "$(ls $1)" ]]; then
+    echo "A compose file must be passed as the first argument" >&2
+    exit -1
+fi
 
 install_docker() {
 	if sudo lxc storage list | grep -q "^| $STORAGE_POOL"; then
@@ -24,12 +30,8 @@ install_docker() {
 	lxc exec $CONTAINER_NAME -- bash -c 'echo \ 
 		"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
 		| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
-
-	lxc exec $CONTAINER_NAME -- bash -c 'echo \
-		"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-		| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
 	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get update"
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y docker-ce docker-ce-cli containerd.io"
+	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin"
 }
 
 restart_docker() {
@@ -37,13 +39,19 @@ restart_docker() {
 		docker container stop $container; \
 		docker container rm $container; \       		
 		done'
-	# lxc exec $CONTAINER_NAME -- bash -c "docker image rm $DOCKER_NAME"
-	# lxc exec $CONTAINER_NAME -- bash -c "docker load -i /root/web/$DOCKER_FILE"
-	# lxc exec $CONTAINER_NAME -- bash -c "docker run -d $DOCKER_NAME"
+    lxc exec $CONTAINER_NAME -- bash -c 'docker images | awk "{print $1}" | while read imageId; do \
+        if [[ $imageId != "IMAGE" ]]; then
+            docker rmi "$imageId"; \
+        fi
+        done'
+    lxc exec $CONTAINER_NAME -- bash -c 'for file in $(ls /root/containers/); do \
+        docker load -i /root/containers/$file; \
+        done'
+    lxc exec $CONTAINER_NAME -- bash -c "cd /root/containers/ | docker-compose up"
 }
 
-load_file() {
-	lxc file push ./$1 $CONTAINER_NAME/root/
+load_container_file() {
+	lxc file push $1 $CONTAINER_NAME/root/containers
 }
 
 build () {
@@ -54,6 +62,9 @@ build () {
 	fi
 	lxc launch ubuntu:jammy $CONTAINER_NAME 
 	install_docker
+    lxc exec $CONTAINER_NAME -- bash -c 'mkdir /root/containers'
+    echo "Setting the docker-compose file"
+    lxc file push $COMPOSE_FILE $CONTAINER_NAME:/root/containers/docker-compose.yaml --force
 	restart_docker
 }
 
@@ -68,16 +79,22 @@ lxcstartc () {
 print_help() {
 	echo "Operate the SUGUS web LXC container. This script MUST be run as root."
 	echo ""
+    echo "USAGE: "
+    echo "lxcops.sh {docker-compose.yaml file path} [-n name] [-l .tar.gz_file_path] [-s [config_file_path]] []"
+    echo "A 'docker-compose.yaml' must be passed as the first argument. This file must define which containers to run and how to start them." 
+    echo ""
 	echo "Commands:"
     echo "  -n {name}  Sets the container name to {name}."
-	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container"
-	echo "  -s [config_file_path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified."
-	echo "  -l	Uploads a container image exported as a .tar.gz file into the LXC container's /root/containers folder."
-	echo "  -r	Restarts all docker containers inside the LXC container."
+	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container. This command will remove all uploaded docker container images."
+	echo "  -s [config file path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified. "
+    echo -n "This command will restart all docker containers."
+	echo "  -l {.tar.gz file path}  Uploads a container image exported as a .tar.gz file into the LXC container's /root/containers folder."
+	echo "  -r	Restarts all docker containers inside the LXC container and reloads all docker images."
+    echo "  -h  Prints this help"
 	echo ""
 }
 
-while getopts "bshrn:" arg; do
+while getopts "bs:rl:n:h" arg; do
 	case $arg in
 		b)
 			echo "Building the LXC container. This will override the container in case it already exists..."
@@ -92,12 +109,12 @@ while getopts "bshrn:" arg; do
 			restart_docker
 			;;
 		l)
-			echo "Uploading the $OPTARG file into the LXC container."
-			load_file
+			echo "Uploading the $OPTARG container image file into the LXC container."
+			load_container_file
 			;;
         n)
             CONTAINER_NAME=$OPTARG
-            echo "Container name set to $OPTARG"
+            echo "LXC Container name set to $OPTARG"
             ;;
 		h)
 			print_help
