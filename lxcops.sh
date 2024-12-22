@@ -1,7 +1,7 @@
 #!/bin/bash
 
 CONTAINER_NAME="myfirstcontainer"
-COMPOSE_FILE=$1
+COMPOSE_FILE="./docker-compose.yaml"
 STORAGE_POOL="docker"
 
 if [[ -z "$(ls $1)" ]]; then
@@ -9,8 +9,19 @@ if [[ -z "$(ls $1)" ]]; then
 	exit -1
 fi
 
+# Execute a command inside the LXC container.
+# Params:
+# 	$1: The command to execute.
+execute_command_in_lxc() {
+	lxc exec $CONTAINER_NAME -- bash -c "$1"
+}
+
+# Installs docker inside the LXC container.
+# Environment variables:
+# 	$STORAGE_POOL: The name of the storage pool.
+# 	$CONTAINER_NAME: The name of the LXC container.	
 install_docker() {
-	if sudo lxc storage list | grep -q "^| $STORAGE_POOL"; then
+	if lxc storage list | grep -q "^| $STORAGE_POOL"; then
 		lxc storage volume delete $STORAGE_POOL $CONTAINER_NAME
 		lxc storage delete $STORAGE_POOL
 	fi
@@ -19,88 +30,122 @@ install_docker() {
 	lxc config device add $CONTAINER_NAME $STORAGE_POOL disk pool=$STORAGE_POOL source=$CONTAINER_NAME path=/var/lib/docker
 	lxc config set $CONTAINER_NAME security.nesting=true security.syscalls.intercept.mknod=true security.syscalls.intercept.setxattr=true
 	lxc restart $CONTAINER_NAME
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get update"
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y \
+	execute_command_in_lxc "apt-get update"
+	execute_command_in_lxc "apt-get install -y \
 		ca-certificates \
 		curl \
 		gnupg \
 		lsb-release"
-	lxc exec $CONTAINER_NAME -- bash -c "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg \
+	execute_command_in_lxc "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg \
 		--dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg"
-	lxc exec $CONTAINER_NAME -- bash -c 'echo \ 
-		"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-		| sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get update"
-	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin"
+	execute_command_in_lxc '
+		echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+		https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+		tee /etc/apt/sources.list.d/docker.list > /dev/null'
+	execute_command_in_lxc "apt-get update"
+	execute_command_in_lxc "apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin"
 }
 
-clean_docker() {
-	docker stop $(docker ps -a -q)
-	docker rm $(docker ps -a -q)
-	docker image prune -f
+lxc_docker_run() {
+	echo "[+] Running docker compose"
+	execute_command_in_lxc "cd /root/yaml | docker-compose up"
 }
 
-clean_docker_containers() {
-	docker stop $(docker ps -a -q)
-	docker rm $(docker ps -a -q)
+lxc_docker_build_and_run() {
+	execute_command_in_lxc 'source /root/ops_in_lxc.sh; build_docker_images /root/containers'
+	lxc_docker_run
 }
 
-restart_docker() {
-	lxc exec $CONTAINER_NAME -- bash -c '$(declare -f clean_docker_containers); clean_docker_containers'
-	# lxc exec $CONTAINER_NAME -- bash -c "docker run -d $DOCKER_NAME"
+# Stops and removes all containers and starts all containers again from the .yaml file.
+# Params:
+# 	$1: .yaml file from which to start the containers.
+# Environment variables:
+#	$CONTAINER_NAME: Name of the LXC container.
+restart_docker_containers() {
+	execute_command_in_lxc 'source /root/ops_in_lxc.sh; docker_stop_and_remove_all'
+	lxc_docker_run
 }
 
-reinit_docker() {
-	lxc exec $CONTAINER_NAME -- bash -c '$(declare -f clean_docker); clean_docker'
-	lxc exec $CONTAINER_NAME -- bash -c "docker load -i /root/web/$DOCKER_FILE"
+# Cleans all Docker resources and builds and executes Docker again in the LXC container.
+reinitialize_docker() {
+	execute_command_in_lxc 'source /root/ops_in_lxc.sh; docker_clean_all_resources'
+	lxc_docker_build_and_run
 }
 
+# Loads a file into a route in the LXC container.
+# Params:
+#	$1: The file name (in the local FS).
+#	$2: The route inside the LXC container. (including the file name)
+# Environment variables:
+#	$CONTAINER_NAME: The name of the LXC container.
 load_file() {
-	lxc file push ./$1 $CONTAINER_NAME/root/
-	lxc exec $CONTAINER_NAME -- bash -c 'for container in $(docker ps -q); do \
-		docker container stop $container; \
-		docker container rm $container; \       		
-		done'
-	lxc exec $CONTAINER_NAME -- bash -c 'docker images | awk "{print $1}" | while read imageId; do \
-		if [[ $imageId != "IMAGE" ]]; then
-			docker rmi "$imageId"; \
-		fi
-		done'
-	lxc exec $CONTAINER_NAME -- bash -c 'for file in $(ls /root/containers/); do \
-		docker load -i /root/containers/$file; \
-		done'
-	lxc exec $CONTAINER_NAME -- bash -c "cd /root/containers/ | docker-compose up"
+	echo "[+] Loading file '$1' from host FS into '$2'"
+	execute_command_in_lxc "if [ ! -d '$2' ]; then
+		mkdir -p $(dirname $2)
+		fi"
+	execute_command_in_lxc "rm -f $2"
+	lxc file push ./$1 $CONTAINER_NAME$2
 }
 
-load_container_file() {
-	lxc file push $1 $CONTAINER_NAME/root/containers
+# Uploads a new docker compose file.
+# If there's already a docker compose file in the LXC container,
+# it is overwritten by the new one.
+# Params:
+# 	$1: The file path in the host's FS.
+load_yaml_file() {
+	load_file $1 "/root/yaml/docker-compose.yaml"
 }
 
-exist_lxc_image() {
-	if [ $(lxc image list "$LXC_IMAGE" | wc -l) -gt 3 ]; then
+# Uploads a .tar.gz to build a new container, adding the name of the image.
+# Params:
+# 	$1: The path to the .tar.gz file in the host FS.
+#		This file must contain a Dockerfile to build the image.
+#	$2: The docker image name.
+load_container() {
+	load_file $1 "/root/containers/$1"
+	if [ ! -d "/root/containers/$2" ]; then
+		mkdir "/root/containers/$2"
+	fi
+}
+
+# Evaluates whether the LXC image exists.
+# Param: 
+# 	$1: The LXC image.
+# Returns:
+#	0: The LXC image exists.
+#	1: Otherwise.
+exists_lxc_image() {
+	if [ $(lxc image list "$1" | wc -l) -gt 3 ]; then
     	return 0
 	else
 		return 1
 	fi
 }
 
+# Stops and deletes the LXC container
+# Params:
+#	$1: The container name.
+lxc_stop_and_delete() {
+	if lxc list | grep -q "^| $1 "; then
+        echo "Stopping and deleting current instance."
+        lxc stop $1
+        lxc delete $1
+    fi
+}
+
 build () {
-    if ! exist_lxc_image; then
+    if ! exists_lxc_image $LXC_IMAGE; then
         echo "LXC image ($LXC_IMAGE) does not exist."
         return 1
     fi
-    if lxc list | grep -q "^| $CONTAINER_NAME "; then
-        echo "Stopping and deleting current instance."
-        lxc stop $CONTAINER_NAME
-        lxc delete $CONTAINER_NAME
-    fi
+    lxc_stop_and_delete $CONTAINER_NAME
     lxc launch $LXC_IMAGE $CONTAINER_NAME 
     install_docker
-    restart_docker
-	lxc exec $CONTAINER_NAME -- bash -c 'mkdir /root/containers'
+	echo "Installing configuration scripts..."
+	load_file './ops_in_lxc.sh' '/root/ops_in_lxc.sh'
 	echo "Setting the docker-compose file"
-	lxc file push $COMPOSE_FILE $CONTAINER_NAME:/root/containers/docker-compose.yaml --force
-	restart_docker
+	load_yaml_file $COMPOSE_FILE
+	reinitialize_docker
 }
 
 lxcstartc () {
@@ -111,8 +156,20 @@ lxcstartc () {
 	fi
 }
 
+# Returns the name of a .tar.gz file without the extension.
+# As an input, it accepts a path.
+# Params:
+#	$1: The .tar.gz file path.
+# Returns:
+# 	The filename without extension.
+get_tar_name_without_extension() {
+	local filepath="$1"
+	local filename=$(basename "$filepath")
+	echo "${filename%%.*}"
+}
+
 print_help() {
-	echo "Operate the SUGUS web LXC container. This script MUST be run as root."
+	echo "Operate the LXC container. This script MUST be run as root."
 	echo ""
 	echo "USAGE: "
 	echo "lxcops.sh {docker-compose.yaml file path} [-n name] [-l .tar.gz_file_path] [-s [config_file_path]] []"
@@ -120,6 +177,7 @@ print_help() {
 	echo ""
 	echo "Commands:"
 	echo "  -n {name}  Sets the container name to {name}."
+	echo "  -i {image} Sets the LXC image to use."
 	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container. This command will remove all uploaded docker container images."
 	echo "  -s [config file path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified. "
 	echo -n "This command will restart all docker containers."
@@ -129,7 +187,7 @@ print_help() {
 	echo ""
 }
 
-while getopts "bs:rl:n:h" arg; do
+while getopts "bs:rl:n:i:h" arg; do
 	case $arg in
 		b)
 			echo "Building the LXC container. This will override the container in case it already exists..."
@@ -145,11 +203,16 @@ while getopts "bs:rl:n:h" arg; do
 			;;
 		l)
 			echo "Uploading the $OPTARG container image file into the LXC container."
-			load_container_file
+			name=$(get_tar_name_without_extension $OPTARG)
+			load_container $OPTARG $name
 			;;
 		n)
 			CONTAINER_NAME=$OPTARG
 			echo "LXC Container name set to $OPTARG"
+			;;
+		i)
+			LXC_IMAGE=$OPTARG
+			echo "LXC Image set to $LXC_IMAGE"
 			;;
 		h)
 			print_help
