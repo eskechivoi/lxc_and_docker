@@ -1,11 +1,7 @@
 #!/bin/bash
 
 CONTAINER_NAME="myfirstcontainer"
-<<<<<<< HEAD
-LXC_IMAGE="ubuntu:jammy"
-=======
 COMPOSE_FILE=$1
->>>>>>> e04a09462631b2289bc0f68526628a3fa82c9d3a
 STORAGE_POOL="docker"
 
 if [[ -z "$(ls $1)" ]]; then
