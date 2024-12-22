@@ -1,6 +1,7 @@
 #!/bin/bash
 
 CONTAINER_NAME="myfirstcontainer"
+LXC_IMAGE="ubuntu:jammy"
 STORAGE_POOL="docker"
 
 install_docker() {
@@ -32,29 +33,52 @@ install_docker() {
 	lxc exec $CONTAINER_NAME -- bash -c "sudo apt-get install -y docker-ce docker-ce-cli containerd.io"
 }
 
+clean_docker() {
+	docker stop $(docker ps -a -q)
+	docker rm $(docker ps -a -q)
+	docker image prune -f
+}
+
+clean_docker_containers() {
+	docker stop $(docker ps -a -q)
+	docker rm $(docker ps -a -q)
+}
+
 restart_docker() {
-	lxc exec $CONTAINER_NAME -- bash -c 'for container in $(docker ps -q); do \
-		docker container stop $container; \
-		docker container rm $container; \       		
-		done'
-	# lxc exec $CONTAINER_NAME -- bash -c "docker image rm $DOCKER_NAME"
-	# lxc exec $CONTAINER_NAME -- bash -c "docker load -i /root/web/$DOCKER_FILE"
+	lxc exec $CONTAINER_NAME -- bash -c '$(declare -f clean_docker_containers); clean_docker_containers'
 	# lxc exec $CONTAINER_NAME -- bash -c "docker run -d $DOCKER_NAME"
+}
+
+reinit_docker() {
+	lxc exec $CONTAINER_NAME -- bash -c '$(declare -f clean_docker); clean_docker'
+	lxc exec $CONTAINER_NAME -- bash -c "docker load -i /root/web/$DOCKER_FILE"
 }
 
 load_file() {
 	lxc file push ./$1 $CONTAINER_NAME/root/
 }
 
-build () {
-	if lxc list | grep -q "^| $CONTAINER_NAME "; then
-		echo "Stopping and deleting current instance."
-		lxc stop $CONTAINER_NAME
-		lxc delete $CONTAINER_NAME
+exist_lxc_image() {
+	if [ $(lxc image list "$LXC_IMAGE" | wc -l) -gt 3 ]; then
+    	return 0
+	else
+		return 1
 	fi
-	lxc launch ubuntu:jammy $CONTAINER_NAME 
-	install_docker
-	restart_docker
+}
+
+build () {
+    if ! exist_lxc_image; then
+        echo "LXC image ($LXC_IMAGE) does not exist."
+        return 1
+    fi
+    if lxc list | grep -q "^| $CONTAINER_NAME "; then
+        echo "Stopping and deleting current instance."
+        lxc stop $CONTAINER_NAME
+        lxc delete $CONTAINER_NAME
+    fi
+    lxc launch $LXC_IMAGE $CONTAINER_NAME 
+    install_docker
+    restart_docker
 }
 
 lxcstartc () {
