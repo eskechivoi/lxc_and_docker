@@ -1,11 +1,11 @@
 #!/bin/bash
 
-CONTAINER_NAME="myfirstcontainer"
-COMPOSE_FILE="./docker-compose.yaml"
-STORAGE_POOL="docker"
+CONTAINER_NAME="${CONTAINER_NAME:-myfirstcontainer}"
+COMPOSE_FILE="${COMPOSE_FILE:-./docker-compose.yaml}"
+STORAGE_POOL="${STORAGE_POOL:-docker}"
 
 if [[ -z "$(ls $1)" ]]; then
-	echo "A compose file must be passed as the first argument" >&2
+	echo "[*] A compose file must be passed as the first argument" >&2
 	exit -1
 fi
 
@@ -21,15 +21,20 @@ execute_command_in_lxc() {
 # 	$STORAGE_POOL: The name of the storage pool.
 # 	$CONTAINER_NAME: The name of the LXC container.	
 install_docker() {
+	echo "[-] Deleting previous volumes for docker."
 	if lxc storage list | grep -q "^| $STORAGE_POOL"; then
 		lxc storage volume delete $STORAGE_POOL $CONTAINER_NAME
 		lxc storage delete $STORAGE_POOL
 	fi
+	echo "[-] Creating and attaching a volume for docker."
 	lxc storage create $STORAGE_POOL btrfs
 	lxc storage volume create $STORAGE_POOL $CONTAINER_NAME
 	lxc config device add $CONTAINER_NAME $STORAGE_POOL disk pool=$STORAGE_POOL source=$CONTAINER_NAME path=/var/lib/docker
+	echo "[-] Setting the security policy for docker."
 	lxc config set $CONTAINER_NAME security.nesting=true security.syscalls.intercept.mknod=true security.syscalls.intercept.setxattr=true
+	echo "[-] Restarting LXC container."
 	lxc restart $CONTAINER_NAME
+	echo "[-] Installing docker..."
 	execute_command_in_lxc "apt-get update"
 	execute_command_in_lxc "apt-get install -y \
 		ca-certificates \
@@ -44,6 +49,7 @@ install_docker() {
 		tee /etc/apt/sources.list.d/docker.list > /dev/null'
 	execute_command_in_lxc "apt-get update"
 	execute_command_in_lxc "apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin"
+	echo "[-] Finished installing docker."
 }
 
 lxc_docker_run() {
@@ -127,7 +133,7 @@ exists_lxc_image() {
 #	$1: The container name.
 lxc_stop_and_delete() {
 	if lxc list | grep -q "^| $1 "; then
-        echo "Stopping and deleting current instance."
+        echo "[+] Stopping and deleting current instance."
         lxc stop $1
         lxc delete $1
     fi
@@ -135,15 +141,15 @@ lxc_stop_and_delete() {
 
 build () {
     if ! exists_lxc_image $LXC_IMAGE; then
-        echo "LXC image ($LXC_IMAGE) does not exist."
+        echo "[*] LXC image ($LXC_IMAGE) does not exist." >&2
         return 1
     fi
     lxc_stop_and_delete $CONTAINER_NAME
     lxc launch $LXC_IMAGE $CONTAINER_NAME 
     install_docker
-	echo "Installing configuration scripts..."
+	echo "[+] Installing configuration scripts..."
 	load_file './ops_in_lxc.sh' '/root/ops_in_lxc.sh'
-	echo "Setting the docker-compose file"
+	echo "[+] Setting the docker-compose file"
 	load_yaml_file $COMPOSE_FILE
 	reinitialize_docker
 }
@@ -167,59 +173,3 @@ get_tar_name_without_extension() {
 	local filename=$(basename "$filepath")
 	echo "${filename%%.*}"
 }
-
-print_help() {
-	echo "Operate the LXC container. This script MUST be run as root."
-	echo ""
-	echo "USAGE: "
-	echo "lxcops.sh {docker-compose.yaml file path} [-n name] [-l .tar.gz_file_path] [-s [config_file_path]] []"
-	echo "A 'docker-compose.yaml' must be passed as the first argument. This file must define which containers to run and how to start them." 
-	echo ""
-	echo "Commands:"
-	echo "  -n {name}  Sets the container name to {name}."
-	echo "  -i {image} Sets the LXC image to use."
-	echo "  -b 	Builds the LXC container and overrides it in case it already exists. It also starts the lxc container. This command will remove all uploaded docker container images."
-	echo "  -s [config file path]  Starts the LXC container without cleaning the current container (that is, without overriding it). A configuration file can also be specified. "
-	echo -n "This command will restart all docker containers."
-	echo "  -l {.tar.gz file path}  Uploads a container image exported as a .tar.gz file into the LXC container's /root/containers folder."
-	echo "  -r	Restarts all docker containers inside the LXC container and reloads all docker images."
-	echo "  -h  Prints this help"
-	echo ""
-}
-
-while getopts "bs:rl:n:i:h" arg; do
-	case $arg in
-		b)
-			echo "Building the LXC container. This will override the container in case it already exists..."
-			build	
-			;;
-		s)
-			echo "Starting the LXC container..."
-			lxcstartc
-			;;
-		r)
-			echo "Restarting the docker containers inside the LXC container."
-			restart_docker
-			;;
-		l)
-			echo "Uploading the $OPTARG container image file into the LXC container."
-			name=$(get_tar_name_without_extension $OPTARG)
-			load_container $OPTARG $name
-			;;
-		n)
-			CONTAINER_NAME=$OPTARG
-			echo "LXC Container name set to $OPTARG"
-			;;
-		i)
-			LXC_IMAGE=$OPTARG
-			echo "LXC Image set to $LXC_IMAGE"
-			;;
-		h)
-			print_help
-			;;
-		\?)
-			echo "Invalid option: -$OPTARG" >&2
-			print_help
-			;;
-	esac
-done
