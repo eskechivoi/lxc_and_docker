@@ -17,6 +17,29 @@ block-beta
     LXCContainer1 --> DockerContainer2
     LXCContainerN --> DockerContainerN
 ```
+# Installation
+
+1. Create a python virtual environment. (_requires python 3.12_)
+```bash
+python3 -m venv venv
+```
+
+2. Activate the virtual environment.
+```bash
+source ./venv/bin/activate
+```
+
+3. Execute `python3 ./lxcops.py -h` to see if its working.
+
+4. Try the following example:
+```bash
+python lxcops.py example_files/docker-compose.yaml -i "ubuntu:jammy" -n "test" -b
+```
+- A path to a docker compose file is passed as argument. 
+- Creates a new LXC container based on ubuntu jammy and named "test".
+- The `-b` option is used to build the new LXC container from scratch, cleaning up all dependencies and installing everything from the ground up.
+
+You can also upload a project in `.tar.gz` format with a Dockerfile inside with the `-l` option. This will build the docker image and thus it will be available to use inside the compose `.yaml` file.
 
 # Release plan
 
