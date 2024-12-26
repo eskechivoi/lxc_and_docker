@@ -1,47 +1,67 @@
 import argparse
 import logging
 import os
+import select
 import sys
 import subprocess
 
 LOGGER = logging.getLogger()
+SUPPORTED_SHELLS = ['/bin/bash']
 
+def get_shell():
+    shell_path = os.getenv('SHELL', None)
+    if not shell_path:
+        shell_path = os.path.isfile('/bin/sh')
+
+    if not shell_path or shell_path not in SUPPORTED_SHELLS:
+        LOGGER.error("This script is not currently supporting your shell.")
+        sys.exit(-1)
+    else:
+        shell = os.path.basename(shell_path)
+        return shell, shell_path
 
 def call_bash_function(function_name, *args):
-    bash_command = f". ./lxcops.sh && {function_name} {' '.join(args)}"
+    shell, shell_path = get_shell()
+    command = f". ./{shell}.sh && {function_name} {' '.join(args)}"
+    LOGGER.debug("Executing: '%s'", command)
+
     process = subprocess.Popen(
-        bash_command,
-        shell=True,
-        executable="/bin/bash",
+        [f"{shell_path}", "-c", command], 
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
         text=True,
-        env=os.environ
+        env=os.environ,
     )
-    while True:
-        output = process.stdout.readline()
-        error = process.stderr.readline()
-        if output == "" and error == "" and process.poll() is not None:
-            break
-        if output:
-            LOGGER.info(output.strip())
-        if error:
-            LOGGER.error(error.strip())
+
+    while not process.poll():
+        rlist, _, _ = select.select([process.stdout, process.stderr], [], [], 1)
+
+        for stream in rlist:
+            line = stream.readline()
+            if not line:
+                break
+
+            if stream is process.stdout:
+                LOGGER.info(line.strip())
+            else:
+                LOGGER.error(line.strip())
+
+    process.stdout.close()
+    process.stderr.close()
     process.wait()
+
     if process.returncode != 0:
-        LOGGER.error(
-            "Command '%s' returned non-zero exit status %s.",
-            bash_command,
-            process.returncode,
-        )
+        LOGGER.error("Command '%s' returned non-zero exit status %s.", command, process.returncode)
 
-
-def conf_logger():
+def conf_logger(verbose=False):
     LOGGER.setLevel(logging.DEBUG)
 
     stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setLevel(logging.INFO)
+    if verbose:
+        stdout_handler.setLevel(logging.DEBUG)
+    else:
+        stdout_handler.setLevel(logging.INFO)
 
     stderr_handler = logging.StreamHandler(sys.stderr)
     stderr_handler.setLevel(logging.ERROR)
@@ -99,17 +119,23 @@ def conf_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Restarts all docker containers inside the LXC container and reloads all docker images.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print the debug messages. It's set to False by default.",
+    )
     return parser
 
 
 def main():
-    conf_logger()
     parser = conf_parser()
     args = parser.parse_args()
+    conf_logger(verbose=args.verbose)
 
     if not os.path.isfile(args.compose_file):
         LOGGER.error(
-            "A compose file must be passed as the first argument", file=sys.stderr
+            "A compose file must be passed as the first argument. This file must exist."
         )
         sys.exit(-1)
     os.environ['COMPOSE_FILE'] = args.compose_file
