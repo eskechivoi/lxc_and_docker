@@ -4,14 +4,30 @@ import os
 import select
 import sys
 import subprocess
+from typing import Optional
 
 LOGGER = logging.getLogger()
-SUPPORTED_SHELLS = ['/bin/bash']
+SUPPORTED_SHELLS = ["/bin/bash"]
+
+
+def get_lxc_version() -> Optional[str]:
+    try:
+        resultado = subprocess.run(
+            ["lxc", "--version"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return resultado.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
+
 
 def get_shell():
-    shell_path = os.getenv('SHELL', None)
+    shell_path = os.getenv("SHELL", None)
     if not shell_path:
-        shell_path = os.path.isfile('/bin/sh')
+        shell_path = os.path.isfile("/bin/sh")
 
     if not shell_path or shell_path not in SUPPORTED_SHELLS:
         LOGGER.error("This script is not currently supporting your shell.")
@@ -20,13 +36,18 @@ def get_shell():
         shell = os.path.basename(shell_path)
         return shell, shell_path
 
+
 def call_bash_function(function_name, *args):
+    version = get_lxc_version()
+    if not version:
+        LOGGER.error("LXC or LXD not correctly installed.")
+
     shell, shell_path = get_shell()
     command = f". ./{shell}.sh && {function_name} {' '.join(args)}"
     LOGGER.debug("Executing: '%s'", command)
 
     process = subprocess.Popen(
-        [f"{shell_path}", "-c", command], 
+        [f"{shell_path}", "-c", command],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL,
@@ -52,7 +73,12 @@ def call_bash_function(function_name, *args):
     process.wait()
 
     if process.returncode != 0:
-        LOGGER.error("Command '%s' returned non-zero exit status %s.", command, process.returncode)
+        LOGGER.error(
+            "Command '%s' returned non-zero exit status %s.",
+            command,
+            process.returncode,
+        )
+
 
 def conf_logger(verbose=False):
     LOGGER.setLevel(logging.DEBUG)
@@ -138,7 +164,7 @@ def main():
             "A compose file must be passed as the first argument. This file must exist."
         )
         sys.exit(-1)
-    os.environ['COMPOSE_FILE'] = args.compose_file
+    os.environ["COMPOSE_FILE"] = args.compose_file
 
     if args.name:
         os.environ["CONTAINER_NAME"] = args.name
