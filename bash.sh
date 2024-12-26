@@ -13,7 +13,7 @@ fi
 # Params:
 # 	$1: The command to execute.
 execute_command_in_lxc() {
-	lxc exec $CONTAINER_NAME -- bash -c "$1"
+	lxc exec $CONTAINER_NAME -- bash -c "$1" 2>&1
 }
 
 # Installs docker inside the LXC container.
@@ -54,7 +54,7 @@ install_docker() {
 
 lxc_docker_run() {
 	echo "[+] Running docker compose"
-	execute_command_in_lxc "cd /root/yaml | docker-compose up"
+	execute_command_in_lxc "docker compose -f /root/yaml/docker-compose.yaml up"
 }
 
 lxc_docker_build_and_run() {
@@ -100,6 +100,18 @@ load_file() {
 # 	$1: The file path in the host's FS.
 load_yaml_file() {
 	load_file $1 "/root/yaml/docker-compose.yaml"
+	echo "[-] Verifying that the compose file was correctly uploaded..."
+	lsres=$(execute_command_in_lxc "ls /root/yaml")
+	uploaded=0
+	for line in $lsres; do
+		if echo "$line" | grep -q "docker-compose.yaml"; then
+			echo "[-] Docker compose file correctly uploaded."
+			uploaded=1
+		fi
+	done
+	if [ $uploaded -ne 1 ]; then
+		echo "[*] Couldn't upload the docker compose file." >&2
+	fi
 }
 
 # Uploads a .tar.gz to build a new container, adding the name of the image.
